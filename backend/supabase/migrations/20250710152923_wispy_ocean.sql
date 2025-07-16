@@ -1,0 +1,79 @@
+-- # Fix Invitation Date Validation for Timezone Issues
+--
+-- This migration updates the validate_invitation_dates function to properly handle
+-- timezone differences between client and server by using date comparison instead of
+-- timestamp comparison for the scheduled date.
+--
+-- 1. Changes
+--   - Update the validate_invitation_dates function to use date comparison for scheduled_date
+--   - Use timestamp comparison only for the combination of date and time
+--   - Add more detailed error messages to help diagnose issues
+--
+-- 2. Security
+--   - Maintain existing behavior for data validation
+--   - Ensure proper error messages for invalid dates
+
+-- Drop the existing trigger first
+DROP TRIGGER IF EXISTS validate_invitation_dates_trigger ON invitations;
+
+-- Create an improved version of the function with better date comparison
+CREATE OR REPLACE FUNCTION validate_invitation_dates()
+RETURNS TRIGGER AS $$
+DECLARE
+  current_date_time timestamptz := NOW();
+  scheduled_date_time timestamptz;
+  current_date_only date := CURRENT_DATE;
+  scheduled_date_only date := NEW.scheduled_date;
+BEGIN
+  -- Log the validation attempt for debugging
+  RAISE NOTICE 'Validating invitation dates: scheduled_date=%, scheduled_start_time=%, current_date=%', 
+    NEW.scheduled_date, NEW.scheduled_start_time, current_date_only;
+  
+  -- For inserts, validate that the scheduled date is not in the past
+  -- Compare dates directly without timezone conversion
+  IF TG_OP = 'INSERT' THEN
+    -- Check if scheduled date is in the past
+    IF scheduled_date_only < current_date_only THEN
+      RAISE EXCEPTION 'Cannot create an invitation for a past date (scheduled: %, current: %)', 
+        scheduled_date_only, current_date_only;
+    END IF;
+    
+    -- If scheduled time is provided, check if the combined date and time is in the past
+    IF NEW.scheduled_start_time IS NOT NULL THEN
+      -- Create a timestamp from the date and time
+      scheduled_date_time := (NEW.scheduled_date || ' ' || NEW.scheduled_start_time)::timestamptz;
+      
+      -- Compare the full timestamp
+      IF scheduled_date_time < current_date_time THEN
+        RAISE EXCEPTION 'Cannot create an invitation for a past date or time (scheduled: %, current: %)', 
+          scheduled_date_time, current_date_time;
+      END IF;
+    END IF;
+  END IF;
+  
+  -- Validate recurrence end date if provided
+  IF NEW.recurrence_type <> 'none' AND NEW.recurrence_type IS NOT NULL AND NEW.recurrence_end_date IS NOT NULL THEN
+    -- Check if recurrence end date is before scheduled date
+    IF NEW.recurrence_end_date < NEW.scheduled_date THEN
+      RAISE EXCEPTION 'Recurrence end date must be after the scheduled date';
+    END IF;
+  END IF;
+  
+  -- For weekly recurrence, ensure at least one day of the week is selected
+  IF NEW.recurrence_type = 'weekly' AND 
+     (NEW.recurrence_days_of_week IS NULL OR array_length(NEW.recurrence_days_of_week, 1) IS NULL OR array_length(NEW.recurrence_days_of_week, 1) = 0) THEN
+    RAISE EXCEPTION 'Weekly recurrence requires at least one day of the week to be selected';
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create the trigger on the invitations table
+CREATE TRIGGER validate_invitation_dates_trigger
+BEFORE INSERT OR UPDATE ON invitations
+FOR EACH ROW
+EXECUTE FUNCTION validate_invitation_dates();
+
+-- Add comment to document the function
+COMMENT ON FUNCTION validate_invitation_dates IS 'Validates that invitation dates and times are not in the past using direct date comparison to avoid timezone issues';

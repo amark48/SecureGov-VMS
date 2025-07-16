@@ -1,0 +1,10 @@
+ALTER TABLE tenants ADD COLUMN azure_ad_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE tenants ADD COLUMN azure_ad_tenant_id TEXT;
+ALTER TABLE tenants ADD COLUMN azure_ad_client_id TEXT;
+ALTER TABLE tenants ADD COLUMN azure_ad_jwks_uri TEXT;
+ALTER TABLE tenants ADD COLUMN azure_ad_issuer TEXT;
+ALTER TABLE tenants ADD COLUMN azure_ad_audience TEXT;
+ALTER TABLE tenants ADD COLUMN aws_federation_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE tenants ADD COLUMN aws_region TEXT;
+ALTER TABLE tenants ADD COLUMN aws_federated_role_arn_prefix TEXT;
+ALTER TABLE tenants ADD COLUMN auth_strategy TEXT;
